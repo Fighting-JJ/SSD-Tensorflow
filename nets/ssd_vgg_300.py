@@ -331,21 +331,26 @@ def ssd_anchor_one_layer(img_shape,
     # y = (y.astype(dtype) + offset) / feat_shape[0]
     # x = (x.astype(dtype) + offset) / feat_shape[1]
     # Weird SSD-Caffe computation using steps values...
+
+    # step 即当前featuremap中一个cell对应的感受野大小，
+    # #即归一化，注释部分代码应该也可以的
     y, x = np.mgrid[0:feat_shape[0], 0:feat_shape[1]]
-    y = (y.astype(dtype) + offset) * step / img_shape[0]
+    y = (y.astype(dtype) + offset) * step / img_shape[0]                                                        
     x = (x.astype(dtype) + offset) * step / img_shape[1]
 
     # Expand dims to support easy broadcasting.
-    y = np.expand_dims(y, axis=-1)
-    x = np.expand_dims(x, axis=-1)
+    y = np.expand_dims(y, axis=-1)  # grdcell gridcell 1
+    x = np.expand_dims(x, axis=-1)  # grdcell gridcell 1
 
     # Compute relative height and width.
     # Tries to follow the original implementation of SSD for the order.
-    num_anchors = len(sizes) + len(ratios)
+    num_anchors = len(sizes) + len(ratios)   # 两个正方形的框len(sizes) + 有比例变化的长方形框len(ratios)
     h = np.zeros((num_anchors, ), dtype=dtype)
     w = np.zeros((num_anchors, ), dtype=dtype)
     # Add first anchor boxes with ratio=1.
-    h[0] = sizes[0] / img_shape[0]
+     # size [(21., 45.),(45., 99.),(99., 153.),(153., 207.),(207., 261.),(261., 315.)] 大小是和
+     # 输入图像的shape（300，300）的尺度一致的 （300，300）
+    h[0] = sizes[0] / img_shape[0]    
     w[0] = sizes[0] / img_shape[1]
     di = 1
     if len(sizes) > 1:
@@ -398,11 +403,11 @@ def tensor_shape(x, rank=3):
                 for s, d in zip(static_shape, dynamic_shape)]
 
 
-def ssd_multibox_layer(inputs,
-                       num_classes,
-                       sizes,
-                       ratios=[1],
-                       normalization=-1,
+def ssd_multibox_layer(inputs, #end_points[layer]
+                       num_classes, # num_classes
+                       sizes,   #anchor_sizes[i]
+                       ratios=[1], #anchor_ratios
+                       normalization=-1, # normalizations  what it means ?
                        bn_normalization=False):
     """Construct a multibox layer, return a class and localization predictions.
     """
@@ -415,10 +420,10 @@ def ssd_multibox_layer(inputs,
     # Location.
     num_loc_pred = num_anchors * 4
     loc_pred = slim.conv2d(net, num_loc_pred, [3, 3], activation_fn=None,
-                           scope='conv_loc')
+                           scope='conv_loc')            # 输出的通道数为num_anchors * 4
     loc_pred = custom_layers.channel_to_last(loc_pred)
-    loc_pred = tf.reshape(loc_pred,
-                          tensor_shape(loc_pred, 4)[:-1]+[num_anchors, 4])
+    loc_pred = tf.reshape(loc_pred,                                          #tensor_shape(loc_pred, 4)[:-1]+[num_anchors, 4] list相加操作，拼接
+                          tensor_shape(loc_pred, 4)[:-1]+[num_anchors, 4])   #tensor_shape(loc_pred, 4)[:-1]不包含最后一个数字
     # Class prediction.
     num_cls_pred = num_anchors * num_classes
     cls_pred = slim.conv2d(net, num_cls_pred, [3, 3], activation_fn=None,
@@ -431,7 +436,7 @@ def ssd_multibox_layer(inputs,
 
 def ssd_net(inputs,
             num_classes=SSDNet.default_params.num_classes,
-            feat_layers=SSDNet.default_params.feat_layers,
+            feat_layers=SSDNet.default_params.feat_layers,#feat_layers=['block4', 'block7', 'block8', 'block9', 'block10', 'block11'],
             anchor_sizes=SSDNet.default_params.anchor_sizes,
             anchor_ratios=SSDNet.default_params.anchor_ratios,
             normalizations=SSDNet.default_params.normalizations,
@@ -448,30 +453,30 @@ def ssd_net(inputs,
     # End_points collect relevant activations for external use.
     end_points = {}
     with tf.variable_scope(scope, 'ssd_300_vgg', [inputs], reuse=reuse):
-        # Original VGG-16 blocks.
+        # Original VGG-16 blocks.  inputs_shape = 300*300
         net = slim.repeat(inputs, 2, slim.conv2d, 64, [3, 3], scope='conv1')
         end_points['block1'] = net
         net = slim.max_pool2d(net, [2, 2], scope='pool1')
-        # Block 2.
+        # Block 2.                 inputs_shape = 150*150
         net = slim.repeat(net, 2, slim.conv2d, 128, [3, 3], scope='conv2')
         end_points['block2'] = net
         net = slim.max_pool2d(net, [2, 2], scope='pool2')
-        # Block 3.
+        # Block 3.                    inputs_shape = 75*75
         net = slim.repeat(net, 3, slim.conv2d, 256, [3, 3], scope='conv3')
         end_points['block3'] = net
         net = slim.max_pool2d(net, [2, 2], scope='pool3')
-        # Block 4.
+        # Block 4.                      inputs_shape = 38*38
         net = slim.repeat(net, 3, slim.conv2d, 512, [3, 3], scope='conv4')
         end_points['block4'] = net
         net = slim.max_pool2d(net, [2, 2], scope='pool4')
-        # Block 5.
+        # Block 5.                      inputs_shape = 19*19
         net = slim.repeat(net, 3, slim.conv2d, 512, [3, 3], scope='conv5')
         end_points['block5'] = net
         net = slim.max_pool2d(net, [3, 3], stride=1, scope='pool5')
 
         # Additional SSD blocks.
-        # Block 6: let's dilate the hell out of it!
-        net = slim.conv2d(net, 1024, [3, 3], rate=6, scope='conv6')
+        # Block 6: let's dilate the hell out of it!   
+        net = slim.conv2d(net, 1024, [3, 3], rate=6, scope='conv6')  
         end_points['block6'] = net
         net = tf.layers.dropout(net, rate=dropout_keep_prob, training=is_training)
         # Block 7: 1x1 conv. Because the fuck.
@@ -616,11 +621,11 @@ def ssd_losses(logits, localisations,
         # Hard negative mining...
         no_classes = tf.cast(pmask, tf.int32)
         predictions = slim.softmax(logits)
-        nmask = tf.logical_and(tf.logical_not(pmask),
+        nmask = tf.logical_and(tf.logical_not(pmask),   # nmask: negative mask
                                gscores > -0.5)
         fnmask = tf.cast(nmask, dtype)
-        nvalues = tf.where(nmask,
-                           predictions[:, 0],
+        nvalues = tf.where(nmask,   
+                           predictions[:, 0],   # 背景
                            1. - fnmask)
         nvalues_flat = tf.reshape(nvalues, [-1])
         # Number of negative entries to select.
@@ -628,7 +633,7 @@ def ssd_losses(logits, localisations,
         n_neg = tf.cast(negative_ratio * n_positives, tf.int32) + batch_size
         n_neg = tf.minimum(n_neg, max_neg_entries)
 
-        val, idxes = tf.nn.top_k(-nvalues_flat, k=n_neg)
+        val, idxes = tf.nn.top_k(-nvalues_flat, k=n_neg)  #得分最低的k个，反向吃鸡的
         max_hard_pred = -val[-1]
         # Final negative mask.
         nmask = tf.logical_and(nmask, nvalues < max_hard_pred)
